@@ -1,74 +1,82 @@
+// linked.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "alloc.h"
 
-/*This program reads file names and block counts from "sizes.txt" and simulates linked allocation for each file.*/
-
-struct Block {
-    int blockNum;           // Block number in simulated disk
-    struct Block *next;     // Pointer to next block
-};
-
-struct FileEntry {
-    char name[100];
-    int blocksNeeded;       // How many blocks the file needs
-    struct Block *start;    // Linked list head for this file
-};
-
-int main() {
-    FILE *fp = fopen("sizes.txt", "r");
-    if (!fp) {
-        printf("Error: sizes.txt not found.\n");
-        return 1;
+void print_disk_map_linked(char filenames[][50], int owner[], int totalBlocks) {
+    printf("\nDisk map (block : content)\n");
+    for (int i = 0; i < totalBlocks; ++i) {
+        if (owner[i] == -1) printf("%2d: .  ", i);
+        else printf("%2d:%.6s  ", i, filenames[owner[i]]);
     }
+    printf("\n");
+}
 
-    struct FileEntry files[50];
-    int fileCount = 0;
-    printf("===LINKED FILE ALLOCATION SYSTEM===\n");
+void linkedAllocate(char filenames[][50], int sizes[], int nFiles, int totalBlocks) {
+    if (totalBlocks > 1000) totalBlocks = 1000;
+    int next[1000];
+    int owner[1000];
+    for (int i = 0; i < totalBlocks; ++i) { next[i] = -1; owner[i] = -1; }
 
-    // Read filename + block count from sizes.txt
-    while (fscanf(fp, "%s %d", files[fileCount].name, &files[fileCount].blocksNeeded) != EOF) {
-        fileCount++;
-    }
-    fclose(fp);
+    printf("Linked Allocation (chains)\n\n");
+    int left = 0, right = totalBlocks - 1;
+    int useLeft = 1;
 
-    printf("Loaded %d files from sizes.txt\n", fileCount);
+    for (int f = 0; f < nFiles; ++f) {
+        int need = sizes[f];
+        if (need == 0) { printf("%s : size 0 (no blocks)\n", filenames[f]); continue; }
 
-    int nextFreeBlock = 0;  // Starting block number for simulation
-
-    // Allocate linked blocks for each file
-    for (int i = 0; i < fileCount; i++) {
-        struct Block *head = NULL, *tail = NULL;
-        for (int b = 0; b < files[i].blocksNeeded; b++) {
-            // Create a new block
-            struct Block *newBlock = (struct Block *)malloc(sizeof(struct Block));
-            newBlock->blockNum = nextFreeBlock++;
-            newBlock->next = NULL;
-            // Insert into linked list
-            if (head == NULL) {
-                head = tail = newBlock;
+        int first = -1, prev = -1;
+        int allocated = 0;
+        for (int alloc = 0; alloc < need; ++alloc) {
+            int chosen = -1;
+            if (useLeft) {
+                while (left <= right && owner[left] != -1) left++;
+                if (left <= right) { chosen = left; left++; }
             } else {
-                tail->next = newBlock;
-                tail = newBlock;
+                while (right >= left && owner[right] != -1) right--;
+                if (right >= left) { chosen = right; right--; }
             }
+            useLeft = !useLeft;
+
+            if (chosen == -1) {
+                for (int i = 0; i < totalBlocks; ++i) if (owner[i] == -1) { chosen = i; break; }
+            }
+
+            if (chosen == -1) {
+                // not enough blocks, rollback
+                printf("%s -> Allocation failed (not enough blocks)\n", filenames[f]);
+                int cur = first;
+                while (cur != -1) { owner[cur] = -1; cur = next[cur]; }
+                // reset next entries that were part of this failed allocation
+                for (int i = 0; i < totalBlocks; ++i) if (owner[i] == -1) next[i] = -1;
+                first = -1;
+                allocated = 0;
+                break;
+            }
+
+            owner[chosen] = f;
+            next[chosen] = -1;
+            if (first == -1) first = chosen;
+            if (prev != -1) next[prev] = chosen;
+            prev = chosen;
+            allocated++;
         }
-        files[i].start = head;
-    }
-    printf("\n===ALLOCATION RESULTS===\n");
 
-    for (int i = 0; i < fileCount; i++) {
-        printf("\nFile: %s\n", files[i].name);
-        printf("Blocks Needed: %d\n", files[i].blocksNeeded);
-        printf("Linked Allocation Path:\n");
-
-        struct Block *temp = files[i].start;
-        while (temp != NULL) {
-            printf("[%d] -> ", temp->blockNum);
-            temp = temp->next;
+        if (first != -1) {
+            printf("%s chain head=%d : ", filenames[f], first);
+            int cur = first;
+            while (cur != -1) {
+                printf("%d", cur);
+                cur = next[cur];
+                if (cur != -1) printf(" -> ");
+            }
+            printf("\n");
+        } else if (allocated == 0) {
+            // already printed failure
         }
-        printf("NULL\n");
     }
 
-    printf("\n===Allocation completed successfully===\n");
-    return 0;
+    print_disk_map_linked(filenames, owner, totalBlocks);
 }

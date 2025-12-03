@@ -1,0 +1,4 @@
+fileA.txt 5
+notes.pdf 3
+image.png 7
+data.bin 2
